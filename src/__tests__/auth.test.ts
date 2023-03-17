@@ -9,18 +9,17 @@ describe("Testing auth functions", () => {
   let password: string;
 
   beforeAll(async () => {
-    auth = new Auth();
     email = faker.internet.email();
     password = faker.internet.password();
   });
 
   it("should sign up", async () => {
-    const { wallet } = await auth.signUp(email, password);
+    const { wallet } = await Auth.signUp(email, password);
     expect(wallet).toBeTruthy();
   });
 
   it("should sign in", async () => {
-    const { wallet } = await auth.signIn(email, password);
+    const { wallet } = await Auth.signIn(email, password);
     expect(wallet).toBeTruthy();
   });
 });

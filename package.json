@@ -24,8 +24,8 @@
     "node": ">=16.0.0"
   },
   "dependencies": {
-    "@akord/crypto": "0.6.0",
-    "gun": "^0.2020.1238"
+    "@akord/crypto": "0.10.0",
+    "@aws-amplify/auth": "^5.1.13"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.12.1",
