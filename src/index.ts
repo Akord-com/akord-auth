@@ -7,14 +7,25 @@ class Auth {
 
   private constructor() { }
 
-  public static init(env: "dev" | "v2", storage?: StorageType) {
+  public static init(env?: "dev" | "v2", storage?: Storage) {
     const config = apiConfig(env)
     JWTAuth.configure({
       userPoolId: config.userPoolId,
       userPoolWebClientId: config.userPoolsWebClientId,
       region: 'eu-central-1',
-      storage: getStorage(storage)
+      storage: storage || getDefaultStorage()
     })
+    return JWTAuth
+  }
+
+  public static configure(name: string, value: string) {
+    JWTAuth.configure({
+      [name]: value
+    })
+  }
+
+  public static getJWTAuth() {
+    return JWTAuth
   }
 
   /**
@@ -29,17 +40,17 @@ class Auth {
     return { wallet, jwt }
   };
 
-    /**
-  * @param  {string} email
-  * @param  {string} password
-  * @returns Promise with Akord Client instance & Akord Wallet
-  */
-    public static authenticate = async function (email: string): Promise<AuthSession> {
-      const jwt = await Auth.getJwt()
-      const user = await JWTAuth.currentAuthenticatedUser()
-      const wallet = await AkordWallet.importFromKeystore(user.attributes["custom:encBackupPhrase"]);
-      return { wallet, jwt }
-    };
+  /**
+* @param  {string} email
+* @param  {string} password
+* @returns Promise with Akord Client instance & Akord Wallet
+*/
+  public static authenticate = async function (): Promise<AuthSession> {
+    const jwt = await Auth.getJwt()
+    const user = await JWTAuth.currentAuthenticatedUser()
+    const wallet = await AkordWallet.importFromKeystore(user.attributes["custom:encBackupPhrase"]);
+    return { wallet, jwt }
+  };
 
   public static signOut = async function (): Promise<void> {
     await JWTAuth.signOut();
@@ -72,7 +83,7 @@ class Auth {
   };
 
   public static resendSignUp = async function (email: string, options: SignUpOptions = {}): Promise<void> {
-    await Auth.resendSignUp(email, { verifyUrl: options.verifyUrl });
+    await JWTAuth.resendSignUp(email, { verifyUrl: options.verifyUrl });
   }
 
   /**
@@ -86,11 +97,8 @@ class Auth {
     });
   };
 
-  public static changePassword = async function (email: string, currentPassword: string, newPassword: string): Promise<AuthSession> {
-    let user = await JWTAuth.currentAuthenticatedUser()
-    if (!user || user.attributes['email'] !== email) {
-      user = await JWTAuth.signIn(email, currentPassword)
-    }
+  public static changePassword = async function (currentPassword: string, newPassword: string): Promise<AuthSession> {
+    const user = await JWTAuth.currentAuthenticatedUser()
     const encBackupPhrase = user.attributes['custom:encBackupPhrase']
     const wallet = await AkordWallet.changePassword(
       currentPassword,
@@ -109,6 +117,11 @@ class Auth {
     return { wallet, jwt }
   };
 
+  public static changePasswordSubmit = async function (email: string, code: string, password: string): Promise<void> {
+    await JWTAuth.forgotPasswordSubmit(email, code, password)
+  };
+
+
   /**
    * Gets jwt token
    * 1. Get idToken, accessToken, refreshToken, and clockDrift from storage
@@ -121,7 +134,7 @@ class Auth {
     if (!session) {
       return null
     }
-    return session.getAccessToken().getJwtToken();
+    return session.getIdToken().getJwtToken();
   };
 
   public static getUserAttributes = async function (): Promise<any> {
@@ -154,10 +167,10 @@ class Auth {
 }
 
 type SignUpOptions = {
-    clientType?: "WEB" | "CLI"
-    verifyUrl?: string;
-    referrerId?: string;
-  }
+  clientType?: "WEB" | "CLI"
+  verifyUrl?: string;
+  referrerId?: string;
+}
 
 type VerifySignUpOptions = {
   baseUrl?: string;
@@ -168,35 +181,20 @@ type AuthSession = {
   jwt: string;
 }
 
-type StorageType = "InMemoryStorage" | "SessionStorage" | "LocalStorage"
-
-function getStorage(storageType: StorageType) {
-  switch (storageType) {
-    case "InMemoryStorage":
-      return MemoryStorage
-    case "SessionStorage":
-      return window.sessionStorage
-    case "LocalStorage":
-      return window.localStorage
-    default:
-      return isNode() ? MemoryStorage : window.localStorage
-  }
-}
-
-function apiConfig(env: string): ApiConfig {
+function apiConfig(env?: string): ApiConfig {
   switch (env) {
+    case "dev":
+      return {
+        apiurl: "https://api.akord.link",
+        userPoolId: "eu-central-1_FOAlZvgHo",
+        userPoolsWebClientId: "3m7t2tk3dpldemk3geq0otrtt9"
+      };
     case "v2":
     default:
       return {
         apiurl: "https://api.akord.com",
         userPoolId: "eu-central-1_glTrP1Kin",
         userPoolsWebClientId: "7u2a1pf5i6shfo7enci6bagk7u"
-      };
-    case "dev":
-      return {
-        apiurl: "https://api.akord.link",
-        userPoolId: "eu-central-1_FOAlZvgHo",
-        userPoolsWebClientId: "3m7t2tk3dpldemk3geq0otrtt9"
       };
   }
 };
@@ -207,8 +205,12 @@ interface ApiConfig {
   userPoolsWebClientId: string
 }
 
+function getDefaultStorage() {
+  return isNode() ? MemoryStorage : window.localStorage
+}
+
 function isNode() {
-  return (typeof process !== 'undefined') && (process.release.name === 'node')
+  return (typeof process !== 'undefined') && (process.release?.name === 'node')
 }
 
 export {
