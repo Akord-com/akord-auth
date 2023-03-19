@@ -4,18 +4,25 @@ import { MemoryStorage } from '@aws-amplify/core';
 
 
 class Auth {
-
+  public static authToken: string
+  public static apiKey: string
+  public static config: ApiConfig
   private constructor() { }
 
-  public static init(env?: "dev" | "v2", storage?: Storage) {
-    const config = apiConfig(env)
-    JWTAuth.configure({
-      userPoolId: config.userPoolId,
-      userPoolWebClientId: config.userPoolsWebClientId,
-      region: 'eu-central-1',
-      storage: storage || getDefaultStorage()
-    })
-    return JWTAuth
+  public static init(options: AuthOptions = defaultAuthOptions) {
+    this.config = apiConfig(options.env)
+    if (options.authToken) {
+      this.authToken = options.authToken
+    } else if (options.apiKey) {
+      this.apiKey = options.apiKey
+    } else {
+      JWTAuth.configure({
+        userPoolId: this.config.userPoolId,
+        userPoolWebClientId: this.config.userPoolsWebClientId,
+        region: 'eu-central-1',
+        storage: options.storage
+      })
+    }
   }
 
   public static configure(name: string, value: string) {
@@ -31,22 +38,20 @@ class Auth {
   /**
   * @param  {string} email
   * @param  {string} password
-  * @returns Promise with Akord Client instance & Akord Wallet
+  * @returns Promise with AuthSession containing Akord Wallet and jwt token
   */
   public static signIn = async function (email: string, password: string): Promise<AuthSession> {
     const user = await JWTAuth.signIn(email, password)
-    const jwt = await Auth.getJwt()
+    const jwt = await Auth.getAuthToken()
     const wallet = await AkordWallet.importFromEncBackupPhrase(password, user.attributes["custom:encBackupPhrase"]);
     return { wallet, jwt }
   };
 
   /**
-* @param  {string} email
-* @param  {string} password
-* @returns Promise with Akord Client instance & Akord Wallet
-*/
+  * @returns Promise with AuthSession containing Akord Wallet and jwt token
+  */
   public static authenticate = async function (): Promise<AuthSession> {
-    const jwt = await Auth.getJwt()
+    const jwt = await Auth.getAuthToken()
     const user = await JWTAuth.currentAuthenticatedUser()
     const wallet = await AkordWallet.importFromKeystore(user.attributes["custom:encBackupPhrase"]);
     return { wallet, jwt }
@@ -59,7 +64,7 @@ class Auth {
   /**
   * @param  {string} email
   * @param  {string} password
-  * @param  {any} clientMetadata JSON client metadata, ex: { clientType: "CLI" }
+  * @param  {SignUpOptions} options JSON client metadata, ex: { clientType: "CLI" }
   * @returns Promise with Akord Wallet
   */
   public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<AuthSession> {
@@ -78,7 +83,7 @@ class Auth {
         "custom:notifications": "true"
       }
     });
-    const jwt = await Auth.getJwt()
+    const jwt = await Auth.getAuthToken()
     return { wallet, jwt };
   };
 
@@ -113,7 +118,7 @@ class Auth {
       currentPassword,
       newPassword
     )
-    const jwt = await Auth.getJwt()
+    const jwt = await Auth.getAuthToken()
     return { wallet, jwt }
   };
 
@@ -123,19 +128,37 @@ class Auth {
 
 
   /**
-   * Gets jwt token
+   * Gets jwt token if available. For SRP auth:
    * 1. Get idToken, accessToken, refreshToken, and clockDrift from storage
    * 2. Validate the tokens if active or expired.
    * 3. If tokens are valid, return current session.
    * 4. If tokens are expired, invoke the refreshToken().
    */
-  public static getJwt = async function (): Promise<string> {
-    const session = await JWTAuth.currentSession();
-    if (!session) {
+  public static getAuthToken = async function (): Promise<string> {
+    if (Auth.authToken) {
+      return Auth.authToken
+    } else if (Auth.apiKey) {
       return null
+    } else {
+      const session = await JWTAuth.currentSession();
+      if (!session) {
+        return null
+      }
+      return session.getIdToken().getJwtToken();
     }
-    return session.getIdToken().getJwtToken();
   };
+
+  public static getAuthorization = async function (): Promise<string> {
+    if (Auth.apiKey) {
+      return Auth.apiKey
+    } else {
+      const token = await Auth.getAuthToken()
+      if (token) {
+        return `Bearer ${token}`
+      }
+    }
+    return null
+  }
 
   public static getUserAttributes = async function (): Promise<any> {
     const user = await JWTAuth.currentAuthenticatedUser() as CognitoUser
@@ -164,12 +187,34 @@ class Auth {
       [attributeName]: attributeValue
     });
   }
+
+  public static generateAPIKey = async function (): Promise<string> {
+    const response = await fetch(`${Auth.config.apiurl}/api-keys`, {
+      method: 'post', 
+      headers: new Headers({
+          'Authorization': await Auth.getAuthorization(), 
+      }), 
+    })
+    return (await response.json()).apiKey
+  }
+}
+
+type AuthOptions = {
+  env?: "dev" | "v2"
+  storage?: Storage | MemoryStorage
+  authToken?: string
+  apiKey?: string
+}
+
+const defaultAuthOptions: AuthOptions = {
+  env: "v2",
+  storage: getDefaultStorage(),
 }
 
 type SignUpOptions = {
   clientType?: "WEB" | "CLI"
-  verifyUrl?: string;
-  referrerId?: string;
+  verifyUrl?: string
+  referrerId?: string
 }
 
 type VerifySignUpOptions = {
