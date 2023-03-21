@@ -226,6 +226,39 @@ class Auth {
       }))
   }
 
+  public static enableMFA = async function (phoneNumber: string): Promise<void> {
+    const { user } = await Auth.getCurrentSessionUser();
+    await Auth.updateUserAttribute("phone", phoneNumber)
+    const smsMfaSettings = {
+      PreferredMfa: true,
+      Enabled: true,
+    };
+    await new Promise((resolve, reject) =>
+      user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
+        if (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+        resolve("mfa_enabled");
+      })
+    );
+  }
+
+  public static disableMFA = async function (): Promise<void> {
+    const { user } = await Auth.getCurrentSessionUser();
+    const smsMfaSettings = {
+      PreferredMfa: false,
+      Enabled: false,
+    };
+    await new Promise((resolve, reject) =>
+      user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
+        if (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+        resolve("mfa_disabled");
+      })
+    );
+  }
+
   public static generateAPIKey = async function (): Promise<string> {
     const response = await fetch(`${Auth.config.apiurl}/api-keys`, {
       method: 'post',
@@ -250,8 +283,6 @@ class Auth {
     return new Promise((resolve, reject) => {
       user.getUserAttributes(async function (err, result) {
         if (err) {
-          console.log(err.message);
-          console.log(JSON.stringify(err));
           reject(err.message);
         }
         const attributes = result.reduce(function (
