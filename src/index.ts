@@ -1,6 +1,7 @@
 import { AkordWallet } from "@akord/crypto";
 import { Auth as JWTAuth, CognitoUser } from "@aws-amplify/auth";
-import { MemoryStorage } from '@aws-amplify/core';
+import { MemoryStorage, Amplify, Hub } from '@aws-amplify/core';
+import { FileStorage } from "./storage";
 
 
 class Auth {
@@ -259,5 +260,9 @@ function isNode() {
 }
 
 export {
-  Auth
+  Auth,
+  Amplify,
+  Hub,
+  MemoryStorage,
+  FileStorage
 }
