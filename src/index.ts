@@ -1,4 +1,4 @@
-import { AkordWallet } from "@akord/crypto";
+import { AkordWallet, signString } from "@akord/crypto";
 import { AuthenticationDetails, CognitoUser, CognitoUserAttribute, CognitoUserPool, CognitoUserSession } from "amazon-cognito-identity-js";
 import { FileStorage } from "./storage";
 
@@ -41,6 +41,41 @@ class Auth {
   };
 
   /**
+  * @param  {string} wallet akord wallet instance
+  * @returns  Promise with AuthSession containing Akord Wallet and jwt token
+  */
+  public signInWithWallet = async function (wallet: AkordWallet): Promise<AuthSession> {
+    const address = await wallet.getAddress();
+    const cognitoUser = Auth.getCognitoUser(address);
+    const authenticationData = {
+      Username: address
+    };
+    const privateKey = await wallet.signingPrivateKeyRaw();
+    const authenticationDetails = new AuthenticationDetails(authenticationData);
+    const { session } = await new Promise((resolve, reject) => {
+      cognitoUser.setAuthenticationFlowType("CUSTOM_AUTH");
+      cognitoUser.initiateAuth(authenticationDetails, {
+        onSuccess: function (result) {
+          resolve({ user: cognitoUser, session: result })
+        },
+        onFailure: function (err) {
+          return reject(err.message);
+        },
+        customChallenge: async function (challengeParameters: { nonce: string }) {
+          const signature = await signString(challengeParameters.nonce, privateKey);
+          cognitoUser.sendCustomChallengeAnswer(signature, this);
+        },
+      })
+    }
+    ) as {
+      user: CognitoUser,
+      session: CognitoUserSession
+    };
+    const jwt = session.getIdToken().getJwtToken();
+    return { wallet, jwt };
+  };
+
+  /**
   * @returns Promise with AuthSession containing Akord Wallet and jwt token
   */
   public static authenticate = async function (): Promise<AuthSession> {
@@ -74,21 +109,14 @@ class Auth {
   */
   public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<void> {
     const wallet = await AkordWallet.create(password);
-    const attributes = [];
-    for (const [key, value] of Object.entries({
+    const attributes = Auth.jsonToUserAttributes({
       email,
       "custom:encBackupPhrase": wallet.encBackupPhrase,
       "custom:publicKey": wallet.publicKey(),
       "custom:publicSigningKey": wallet.signingPublicKey(),
-      "custom:referrerId": options.referrerId,
-      "custom:mode": "dark",
-      "custom:notifications": "true"
-    })) {
-      attributes.push(new CognitoUserAttribute({
-        Name: key,
-        Value: <string>value
-      }));
-    }
+      "custom:address": await wallet.getAddress(),
+      "custom:referrerId": options.referrerId
+    });
     await new Promise((resolve, reject) =>
       this.pool.signUp(email, password, attributes, null, (err, result) => {
         if (err) {
@@ -96,8 +124,39 @@ class Auth {
         } else {
           resolve(result);
         }
-      }, { verifyUrl: options.verifyUrl })
+      }, { verifyUrl: options.verifyUrl, clientType: options.clientType })
     );
+  };
+
+  /**
+  * @param  {AkordWallet} wallet akord wallet instance
+  * @param  {SignUpOptions} options JSON client metadata, ex: { clientType: "CLI" }
+  * @returns Promise with Akord Wallet
+  */
+  public signUpWithWallet = async function (wallet?: AkordWallet, options: SignUpOptions = {}): Promise<{ wallet: AkordWallet }> {
+    const random = Math.random().toString(30);
+    if (!wallet) {
+      wallet = await AkordWallet.create(random);
+    }
+    const address = await wallet.getAddress();
+    const attributes = Auth.jsonToUserAttributes({
+      "custom:publicKey": wallet.publicKey(),
+      "custom:publicSigningKey": wallet.signingPublicKey(),
+      "custom:address": address,
+      "custom:referrerId": options.referrerId,
+      "custom:passwordless": "true"
+    });
+
+    await new Promise((resolve, reject) =>
+      this.pool.signUp(address, random, attributes, null, (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      }, { verifyUrl: options.verifyUrl, clientType: options.clientType })
+    );
+    return { wallet };
   };
 
   public static resendCode = async function (email: string): Promise<Object> {
@@ -360,6 +419,17 @@ class Auth {
     };
     const cognitoUser = new CognitoUser(userData);
     return cognitoUser;
+  }
+
+  private static jsonToUserAttributes(json: any): Array<CognitoUserAttribute> {
+    const attributes = [];
+    for (const [key, value] of Object.entries(json)) {
+      attributes.push(new CognitoUserAttribute({
+        Name: key,
+        Value: <string>value
+      }));
+    }
+    return attributes;
   }
 }
 
