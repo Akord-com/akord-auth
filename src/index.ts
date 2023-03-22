@@ -1,12 +1,13 @@
 import { AkordWallet } from "@akord/crypto";
-import { Auth as JWTAuth, CognitoUser } from "@aws-amplify/auth";
-import { MemoryStorage } from '@aws-amplify/core';
+import { AuthenticationDetails, CognitoUser, CognitoUserAttribute, CognitoUserPool, CognitoUserSession } from "amazon-cognito-identity-js";
+import { FileStorage } from "./storage";
 
 
 class Auth {
   public static authToken: string
   public static apiKey: string
   public static config: ApiConfig
+  public static pool: CognitoUserPool
   private constructor() { }
 
   public static init(options: AuthOptions = defaultAuthOptions) {
@@ -16,24 +17,14 @@ class Auth {
     } else if (options.apiKey) {
       this.apiKey = options.apiKey
     } else {
-      JWTAuth.configure({
-        userPoolId: this.config.userPoolId,
-        userPoolWebClientId: this.config.userPoolsWebClientId,
-        region: 'eu-central-1',
-        storage: options.storage
+      this.pool = new CognitoUserPool({
+        UserPoolId: this.config.userPoolId,
+        ClientId: this.config.userPoolsWebClientId,
+        Storage: options.storage
       })
     }
   }
 
-  public static configure(name: string, value: string) {
-    JWTAuth.configure({
-      [name]: value
-    })
-  }
-
-  public static getJWTAuth() {
-    return JWTAuth
-  }
 
   /**
   * @param  {string} email
@@ -41,25 +32,37 @@ class Auth {
   * @returns Promise with AuthSession containing Akord Wallet and jwt token
   */
   public static signIn = async function (email: string, password: string): Promise<AuthSession> {
-    const user = await JWTAuth.signIn(email, password)
-    const jwt = await Auth.getAuthToken()
-    const wallet = await AkordWallet.importFromEncBackupPhrase(password, user.attributes["custom:encBackupPhrase"]);
-    return { wallet, jwt }
+    const { user, session } = await Auth.authenticateUser(email, password)
+    const attributes = Auth.retrieveUserAttributes(user)
+    const wallet = await AkordWallet.importFromEncBackupPhrase(password, attributes["custom:encBackupPhrase"]);
+    return { wallet, jwt: session.getIdToken().getJwtToken() }
   };
 
   /**
   * @returns Promise with AuthSession containing Akord Wallet and jwt token
   */
   public static authenticate = async function (): Promise<AuthSession> {
-    const jwt = await Auth.getAuthToken()
-    const user = await JWTAuth.currentAuthenticatedUser()
-    const wallet = await AkordWallet.importFromKeystore(user.attributes["custom:encBackupPhrase"]);
-    return { wallet, jwt }
+    const { session, user } = await Auth.getCurrentSessionUser()
+    const attributes = await Auth.retrieveUserAttributes(user)
+    const wallet = await AkordWallet.importFromKeystore(attributes["custom:encBackupPhrase"]);
+    return { wallet, jwt: session.getIdToken().getJwtToken() }
   };
 
   public static signOut = async function (): Promise<void> {
-    await JWTAuth.signOut();
-  };
+    const cognitoUser = Auth.pool.getCurrentUser();
+    if (cognitoUser != null) {
+      const session = await new Promise((resolve, reject) =>
+        cognitoUser.getSession((err, session: CognitoUserSession) => {
+          if (err || !session) {
+            reject(err || "Invalid session")
+          }
+          resolve(session)
+        })
+      )
+      session
+      cognitoUser.signOut();
+    };
+  }
 
   /**
   * @param  {string} email
@@ -69,26 +72,45 @@ class Auth {
   */
   public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<AuthSession> {
     const wallet = await AkordWallet.create(password);
-    await JWTAuth.signUp({
-      username: email,
-      password: password,
-      clientMetadata: { verifyUrl: options.verifyUrl, clientType: options.clientType },
-      attributes: {
-        email,
-        "custom:encBackupPhrase": wallet.encBackupPhrase,
-        "custom:publicKey": wallet.publicKey(),
-        "custom:publicSigningKey": wallet.signingPublicKey(),
-        "custom:referrerId": options.referrerId,
-        "custom:mode": "dark",
-        "custom:notifications": "true"
-      }
-    });
+    const attributes = [];
+    for (const [key, value] of Object.entries({
+      email,
+      "custom:encBackupPhrase": wallet.encBackupPhrase,
+      "custom:publicKey": wallet.publicKey(),
+      "custom:publicSigningKey": wallet.signingPublicKey(),
+      "custom:referrerId": options.referrerId,
+      "custom:mode": "dark",
+      "custom:notifications": "true"
+    })) {
+      attributes.push(new CognitoUserAttribute({
+        Name: key,
+        Value: <string>value
+      }));
+    }
+    const t = await new Promise((resolve, reject) =>
+      Auth.pool.signUp(email, password, attributes, null, (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      }, { verifyUrl: options.verifyUrl })
+    );
     const jwt = await Auth.getAuthToken()
     return { wallet, jwt };
   };
 
-  public static resendSignUp = async function (email: string, options: SignUpOptions = {}): Promise<void> {
-    await JWTAuth.resendSignUp(email, { verifyUrl: options.verifyUrl });
+  public async resendCode(email: string): Promise<Object> {
+    const user = Auth.getCognitoUser(email);
+    return new Promise((resolve, reject) =>
+      user.resendConfirmationCode((err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      })
+    );
   }
 
   /**
@@ -96,36 +118,57 @@ class Auth {
   * @param  {string} code
   * @returns
   */
-  public static verifyAccount = async function (email: string, code: string, options: VerifySignUpOptions): Promise<void> {
-    await JWTAuth.confirmSignUp(email, code, {
-      clientMetadata: { baseUrl: options.baseUrl }
-    });
-  };
+  public async verifyAccount(email: string, code: string): Promise<Object> {
+    const user = Auth.getCognitoUser(email);
+    return new Promise((resolve, reject) =>
+      user.confirmRegistration(code, false, (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      })
+    );
+  }
 
   public static changePassword = async function (currentPassword: string, newPassword: string): Promise<AuthSession> {
-    const user = await JWTAuth.currentAuthenticatedUser()
-    const encBackupPhrase = user.attributes['custom:encBackupPhrase']
+    const { user } = await Auth.getCurrentSessionUser()
+    const attributes = await Auth.retrieveUserAttributes(user)
+    const encBackupPhrase = attributes['custom:encBackupPhrase']
     const wallet = await AkordWallet.changePassword(
       currentPassword,
       newPassword,
       encBackupPhrase
     )
-    await JWTAuth.updateUserAttributes(user, {
-      'custom:encBackupPhrase': wallet.encBackupPhrase
-    })
-    await JWTAuth.changePassword(
-      user,
-      currentPassword,
-      newPassword
-    )
+    await Auth.updateUserAttribute('custom:encBackupPhrase', wallet.encBackupPhrase)
+    await new Promise((resolve, reject) =>
+      user.changePassword(
+        currentPassword,
+        newPassword,
+        (err, result) => {
+          if (err) {
+            reject(err)
+          }
+          resolve(result)
+        }
+      ))
     const jwt = await Auth.getAuthToken()
     return { wallet, jwt }
   };
 
   public static changePasswordSubmit = async function (email: string, code: string, password: string): Promise<void> {
-    await JWTAuth.forgotPasswordSubmit(email, code, password)
+    const { user } = await Auth.getCurrentSessionUser()
+    await new Promise((resolve, reject) =>
+      user.confirmPassword(code, password, {
+        onSuccess() {
+          resolve('password_changed')
+        },
+        onFailure(err) {
+          reject(err)
+        },
+      })
+    );
   };
-
 
   /**
    * Gets jwt token if available. For SRP auth:
@@ -140,7 +183,7 @@ class Auth {
     } else if (Auth.apiKey) {
       return null
     } else {
-      const session = await JWTAuth.currentSession();
+      const session = (await Auth.getCurrentSessionUser()).session;
       if (!session) {
         return null
       }
@@ -161,12 +204,85 @@ class Auth {
   }
 
   public static getUserAttributes = async function (): Promise<any> {
-    const user = await JWTAuth.currentAuthenticatedUser() as CognitoUser
+    const { user } = await Auth.getCurrentSessionUser()
+    return await Auth.retrieveUserAttributes(user)
+  }
+
+  public static updateUserAttribute = async function (attributeName: string, attributeValue: string): Promise<any> {
+    const { user } = await Auth.getCurrentSessionUser();
+    const attributeList = [];
+    const attribute = new CognitoUserAttribute({
+      Name: attributeName,
+      Value: attributeValue,
+    });
+    attributeList.push(attribute);
+
+    await new Promise((resolve, reject) =>
+      user.updateAttributes(attributeList, function (err, result) {
+        if (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+        resolve(result);
+      }))
+  }
+
+  public static enableMFA = async function (phoneNumber: string): Promise<void> {
+    const { user } = await Auth.getCurrentSessionUser();
+    await Auth.updateUserAttribute("phone", phoneNumber)
+    const smsMfaSettings = {
+      PreferredMfa: true,
+      Enabled: true,
+    };
+    await new Promise((resolve, reject) =>
+      user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
+        if (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+        resolve("mfa_enabled");
+      })
+    );
+  }
+
+  public static disableMFA = async function (): Promise<void> {
+    const { user } = await Auth.getCurrentSessionUser();
+    const smsMfaSettings = {
+      PreferredMfa: false,
+      Enabled: false,
+    };
+    await new Promise((resolve, reject) =>
+      user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
+        if (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+        resolve("mfa_disabled");
+      })
+    );
+  }
+
+  public static generateAPIKey = async function (): Promise<string> {
+    const response = await fetch(`${Auth.config.apiurl}/api-keys`, {
+      method: 'post',
+      headers: new Headers({
+        'Authorization': await Auth.getAuthorization(),
+      }),
+    })
+    return (await response.json()).apiKey
+  }
+
+  public static getAPIKey = async function (): Promise<string> {
+    const response = await fetch(`${Auth.config.apiurl}/api-keys`, {
+      method: 'get',
+      headers: new Headers({
+        'Authorization': await Auth.getAuthorization(),
+      }),
+    })
+    return (await response.json()).apiKey
+  }
+
+  private static retrieveUserAttributes = async function (user: CognitoUser): Promise<Object> {
     return new Promise((resolve, reject) => {
       user.getUserAttributes(async function (err, result) {
         if (err) {
-          console.log(err.message);
-          console.log(JSON.stringify(err));
           reject(err.message);
         }
         const attributes = result.reduce(function (
@@ -181,27 +297,62 @@ class Auth {
     })
   }
 
-  public static updateUserAttribute = async function (attributeName: string, attributeValue: string): Promise<any> {
-    const user = await JWTAuth.currentAuthenticatedUser();
-    await JWTAuth.updateUserAttributes(user, {
-      [attributeName]: attributeValue
-    });
+  private static getCurrentSessionUser = async function (): Promise<{
+    user: CognitoUser,
+    session: CognitoUserSession
+  }> {
+
+    const cognitoUser = Auth.pool.getCurrentUser();
+    if (cognitoUser === null) {
+      //return new Error("Invalid session")
+    }
+    return new Promise((resolve, reject) =>
+      cognitoUser.getSession((err, session: CognitoUserSession) => {
+        if (err || !session) {
+          reject(err || "Invalid session")
+        }
+        resolve({ user: cognitoUser, session })
+      })
+    )
   }
 
-  public static generateAPIKey = async function (): Promise<string> {
-    const response = await fetch(`${Auth.config.apiurl}/api-keys`, {
-      method: 'post', 
-      headers: new Headers({
-          'Authorization': await Auth.getAuthorization(), 
-      }), 
-    })
-    return (await response.json()).apiKey
+  private static authenticateUser = async function (email: string, password: string): Promise<{
+    user: CognitoUser,
+    session: CognitoUserSession
+  }> {
+    const authenticationData = {
+      Username: email,
+      Password: password,
+    };
+    const cognitoUser = Auth.getCognitoUser(email);
+    const authenticationDetails = new AuthenticationDetails(authenticationData);
+    return new Promise((resolve, reject) =>
+      cognitoUser.authenticateUser(authenticationDetails, {
+        onSuccess: function (result) {
+          resolve({ user: cognitoUser, session: result })
+        },
+        onFailure: function (err) {
+          console.log(err.message);
+          console.log(JSON.stringify(err));
+          reject(err.message);
+        }
+      })
+    );
+  }
+
+  private static getCognitoUser(username: string): CognitoUser {
+    const userData = {
+      Username: username,
+      Pool: Auth.pool
+    };
+    const cognitoUser = new CognitoUser(userData);
+    return cognitoUser;
   }
 }
 
 type AuthOptions = {
   env?: "dev" | "v2"
-  storage?: Storage | MemoryStorage
+  storage?: Storage
   authToken?: string
   apiKey?: string
 }
@@ -215,10 +366,6 @@ type SignUpOptions = {
   clientType?: "WEB" | "CLI"
   verifyUrl?: string
   referrerId?: string
-}
-
-type VerifySignUpOptions = {
-  baseUrl?: string;
 }
 
 type AuthSession = {
@@ -251,7 +398,7 @@ interface ApiConfig {
 }
 
 function getDefaultStorage() {
-  return isNode() ? MemoryStorage : window.localStorage
+  return isNode() ? null : window.localStorage
 }
 
 function isNode() {
@@ -259,5 +406,6 @@ function isNode() {
 }
 
 export {
-  Auth
+  Auth,
+  FileStorage
 }
