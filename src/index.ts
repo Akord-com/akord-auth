@@ -7,6 +7,7 @@ class Auth {
   public static authToken: string
   public static apiKey: string
   public static config: ApiConfig
+  public static storage: Storage
   public static pool: CognitoUserPool
   private constructor() { }
 
@@ -17,6 +18,7 @@ class Auth {
     } else if (options.apiKey) {
       this.apiKey = options.apiKey
     } else {
+      this.storage = options.storage
       this.pool = new CognitoUserPool({
         UserPoolId: this.config.userPoolId,
         ClientId: this.config.userPoolsWebClientId,
@@ -33,7 +35,7 @@ class Auth {
   */
   public static signIn = async function (email: string, password: string): Promise<AuthSession> {
     const { user, session } = await Auth.authenticateUser(email, password)
-    const attributes = Auth.retrieveUserAttributes(user)
+    const attributes = await Auth.retrieveUserAttributes(user)
     const wallet = await AkordWallet.importFromEncBackupPhrase(password, attributes["custom:encBackupPhrase"]);
     return { wallet, jwt: session.getIdToken().getJwtToken() }
   };
@@ -49,7 +51,7 @@ class Auth {
   };
 
   public static signOut = async function (): Promise<void> {
-    const cognitoUser = Auth.pool.getCurrentUser();
+    const cognitoUser = this.pool.getCurrentUser();
     if (cognitoUser != null) {
       const session = await new Promise((resolve, reject) =>
         cognitoUser.getSession((err, session: CognitoUserSession) => {
@@ -70,7 +72,7 @@ class Auth {
   * @param  {SignUpOptions} options JSON client metadata, ex: { clientType: "CLI" }
   * @returns Promise with Akord Wallet
   */
-  public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<AuthSession> {
+  public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<void> {
     const wallet = await AkordWallet.create(password);
     const attributes = [];
     for (const [key, value] of Object.entries({
@@ -87,8 +89,8 @@ class Auth {
         Value: <string>value
       }));
     }
-    const t = await new Promise((resolve, reject) =>
-      Auth.pool.signUp(email, password, attributes, null, (err, result) => {
+    await new Promise((resolve, reject) =>
+      this.pool.signUp(email, password, attributes, null, (err, result) => {
         if (err) {
           reject(err);
         } else {
@@ -96,11 +98,9 @@ class Auth {
         }
       }, { verifyUrl: options.verifyUrl })
     );
-    const jwt = await Auth.getAuthToken()
-    return { wallet, jwt };
   };
 
-  public async resendCode(email: string): Promise<Object> {
+  public static resendCode = async function (email: string): Promise<Object> {
     const user = Auth.getCognitoUser(email);
     return new Promise((resolve, reject) =>
       user.resendConfirmationCode((err, result) => {
@@ -118,7 +118,7 @@ class Auth {
   * @param  {string} code
   * @returns
   */
-  public async verifyAccount(email: string, code: string): Promise<Object> {
+  public static verifyAccount = async function (email: string, code: string): Promise<Object> {
     const user = Auth.getCognitoUser(email);
     return new Promise((resolve, reject) =>
       user.confirmRegistration(code, false, (err, result) => {
@@ -140,7 +140,7 @@ class Auth {
       newPassword,
       encBackupPhrase
     )
-    await Auth.updateUserAttribute('custom:encBackupPhrase', wallet.encBackupPhrase)
+    await this.updateUserAttribute('custom:encBackupPhrase', wallet.encBackupPhrase)
     await new Promise((resolve, reject) =>
       user.changePassword(
         currentPassword,
@@ -152,7 +152,7 @@ class Auth {
           resolve(result)
         }
       ))
-    const jwt = await Auth.getAuthToken()
+    const jwt = await this.getAuthToken()
     return { wallet, jwt }
   };
 
@@ -178,9 +178,9 @@ class Auth {
    * 4. If tokens are expired, invoke the refreshToken().
    */
   public static getAuthToken = async function (): Promise<string> {
-    if (Auth.authToken) {
-      return Auth.authToken
-    } else if (Auth.apiKey) {
+    if (this.authToken) {
+      return this.authToken
+    } else if (this.apiKey) {
       return null
     } else {
       const session = (await Auth.getCurrentSessionUser()).session;
@@ -192,10 +192,10 @@ class Auth {
   };
 
   public static getAuthorization = async function (): Promise<string> {
-    if (Auth.apiKey) {
-      return Auth.apiKey
+    if (this.apiKey) {
+      return this.apiKey
     } else {
-      const token = await Auth.getAuthToken()
+      const token = await this.getAuthToken()
       if (token) {
         return `Bearer ${token}`
       }
@@ -228,7 +228,7 @@ class Auth {
 
   public static enableMFA = async function (phoneNumber: string): Promise<void> {
     const { user } = await Auth.getCurrentSessionUser();
-    await Auth.updateUserAttribute("phone", phoneNumber)
+    await this.updateUserAttribute("phone", phoneNumber)
     const smsMfaSettings = {
       PreferredMfa: true,
       Enabled: true,
@@ -260,26 +260,35 @@ class Auth {
   }
 
   public static generateAPIKey = async function (): Promise<string> {
-    const response = await fetch(`${Auth.config.apiurl}/api-keys`, {
+    const response = await fetch(`${this.config.apiurl}/api-keys`, {
       method: 'post',
       headers: new Headers({
-        'Authorization': await Auth.getAuthorization(),
+        'Authorization': await this.getAuthorization(),
       }),
     })
     return (await response.json()).apiKey
   }
 
   public static getAPIKey = async function (): Promise<string> {
-    const response = await fetch(`${Auth.config.apiurl}/api-keys`, {
+    const response = await fetch(`${this.config.apiurl}/api-keys`, {
       method: 'get',
       headers: new Headers({
-        'Authorization': await Auth.getAuthorization(),
+        'Authorization': await this.getAuthorization(),
       }),
     })
     if (response.status === 200) {
       return (await response.json()).apiKey
     }
     return null
+  }
+
+  public static deleteAPIKey = async function (): Promise<void> {
+    await fetch(`${this.config.apiurl}/api-keys`, {
+      method: 'delete',
+      headers: new Headers({
+        'Authorization': await this.getAuthorization(),
+      }),
+    })
   }
 
   private static retrieveUserAttributes = async function (user: CognitoUser): Promise<Object> {
@@ -305,7 +314,7 @@ class Auth {
     session: CognitoUserSession
   }> {
 
-    const cognitoUser = Auth.pool.getCurrentUser();
+    const cognitoUser = this.pool.getCurrentUser();
     if (cognitoUser === null) {
       //return new Error("Invalid session")
     }
@@ -327,7 +336,7 @@ class Auth {
       Username: email,
       Password: password,
     };
-    const cognitoUser = Auth.getCognitoUser(email);
+    const cognitoUser = this.getCognitoUser(email);
     const authenticationDetails = new AuthenticationDetails(authenticationData);
     return new Promise((resolve, reject) =>
       cognitoUser.authenticateUser(authenticationDetails, {
@@ -346,7 +355,8 @@ class Auth {
   private static getCognitoUser(username: string): CognitoUser {
     const userData = {
       Username: username,
-      Pool: Auth.pool
+      Pool: this.pool,
+      Storage: this.storage
     };
     const cognitoUser = new CognitoUser(userData);
     return cognitoUser;
