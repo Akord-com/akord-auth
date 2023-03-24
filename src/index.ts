@@ -276,7 +276,10 @@ class Auth {
         'Authorization': await Auth.getAuthorization(),
       }),
     })
-    return (await response.json()).apiKey
+    if (response.status === 200) {
+      return (await response.json()).apiKey
+    }
+    return null
   }
 
   private static retrieveUserAttributes = async function (user: CognitoUser): Promise<Object> {
