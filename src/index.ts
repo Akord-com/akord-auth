@@ -100,7 +100,7 @@ class Auth {
     );
   };
 
-  public async resendCode(email: string): Promise<Object> {
+  public static resendCode = async function (email: string): Promise<Object> {
     const user = Auth.getCognitoUser(email);
     return new Promise((resolve, reject) =>
       user.resendConfirmationCode((err, result) => {
@@ -118,7 +118,7 @@ class Auth {
   * @param  {string} code
   * @returns
   */
-  public async verifyAccount(email: string, code: string): Promise<Object> {
+  public static verifyAccount = async function (email: string, code: string): Promise<Object> {
     const user = Auth.getCognitoUser(email);
     return new Promise((resolve, reject) =>
       user.confirmRegistration(code, false, (err, result) => {
