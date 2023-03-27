@@ -44,13 +44,13 @@ class Auth {
   * @param  {string} wallet akord wallet instance
   * @returns  Promise with AuthSession containing Akord Wallet and jwt token
   */
-  public signInWithWallet = async function (wallet: AkordWallet): Promise<AuthSession> {
+  public static signInWithWallet = async function (wallet: AkordWallet): Promise<AuthSession> {
     const address = await wallet.getAddress();
     const cognitoUser = Auth.getCognitoUser(address);
     const authenticationData = {
       Username: address
     };
-    const privateKey = await wallet.signingPrivateKeyRaw();
+    const privateKey = wallet.signingPrivateKeyRaw();
     const authenticationDetails = new AuthenticationDetails(authenticationData);
     const { session } = await new Promise((resolve, reject) => {
       cognitoUser.setAuthenticationFlowType("CUSTOM_AUTH");
@@ -133,7 +133,7 @@ class Auth {
   * @param  {SignUpOptions} options JSON client metadata, ex: { clientType: "CLI" }
   * @returns Promise with Akord Wallet
   */
-  public signUpWithWallet = async function (wallet?: AkordWallet, options: SignUpOptions = {}): Promise<{ wallet: AkordWallet }> {
+  public static signUpWithWallet = async function (wallet: AkordWallet, options: SignUpOptions = {}): Promise<{ wallet: AkordWallet }> {
     const random = Math.random().toString(30);
     if (!wallet) {
       wallet = await AkordWallet.create(random);
