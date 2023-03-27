@@ -203,6 +203,32 @@ class Auth {
     return null
   }
 
+  public static getUser = async function (): Promise<UserData> {
+    const { user } = await Auth.getCurrentSessionUser()
+    return await new Promise((resolve, reject) =>
+      user.getUserData((err, data) => {
+        if (err) {
+          reject(err);
+        }
+        const { Username, PreferredMfaSetting, UserAttributes } = data;
+        const attributes = UserAttributes.reduce(function (
+          attributesObject,
+          attribute
+        ) {
+          attributesObject[attribute.Name] = attribute.Value;
+          return attributesObject;
+        }, {});
+        let mfaType: MfaType
+        if (attributes["custom:backupPhraseMFA"] === "true") {
+          mfaType = "BACKUP_PHRASE"
+        } else if (PreferredMfaSetting === "SMS_MFA") {
+          mfaType = "SMS"
+        }
+        resolve({ username: Username, mfaType: mfaType, attributes: attributes })
+      })
+    )
+  }
+
   public static getUserAttributes = async function (): Promise<any> {
     const { user } = await Auth.getCurrentSessionUser()
     return await Auth.retrieveUserAttributes(user)
@@ -226,25 +252,33 @@ class Auth {
       }))
   }
 
-  public static enableMFA = async function (phoneNumber: string): Promise<void> {
+  public static enableMFA = async function (mfaType: MfaType, phoneNumber?: string): Promise<void> {
     const { user } = await Auth.getCurrentSessionUser();
-    await this.updateUserAttribute("phone", phoneNumber)
-    const smsMfaSettings = {
-      PreferredMfa: true,
-      Enabled: true,
-    };
-    await new Promise((resolve, reject) =>
-      user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
-        if (err) {
-          reject(err.message || JSON.stringify(err));
-        }
-        resolve("mfa_enabled");
-      })
-    );
+    if (mfaType === "BACKUP_PHRASE") {
+      await this.updateUserAttribute("custom:backupPhraseMFA", "true")
+    } else {
+      if (!phoneNumber) {
+        throw Error("Phone number is required for SMS MFA")
+      }
+      await this.updateUserAttribute("phone_number", phoneNumber)
+      const smsMfaSettings = {
+        PreferredMfa: true,
+        Enabled: true,
+      };
+      await new Promise((resolve, reject) =>
+        user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
+          if (err) {
+            reject(err.message || JSON.stringify(err));
+          }
+          resolve("mfa_enabled");
+        })
+      );
+    }
   }
 
   public static disableMFA = async function (): Promise<void> {
     const { user } = await Auth.getCurrentSessionUser();
+    await this.updateUserAttribute("custom:backupPhraseMFA", "false")
     const smsMfaSettings = {
       PreferredMfa: false,
       Enabled: false,
@@ -328,7 +362,7 @@ class Auth {
     )
   }
 
-  private static authenticateUser = async function (email: string, password: string): Promise<{
+  private static authenticateUser = async function (email: string, password: string, verificationCode?: string): Promise<{
     user: CognitoUser,
     session: CognitoUserSession
   }> {
@@ -347,7 +381,13 @@ class Auth {
           console.log(err.message);
           console.log(JSON.stringify(err));
           reject(err.message);
-        }
+        },
+        mfaRequired: function (_) {
+          if (!verificationCode) {
+            reject({mfaRequired: true, mfaType: "SMS"})
+          }
+          cognitoUser.sendMFACode(verificationCode, this);
+        },
       })
     );
   }
@@ -385,6 +425,14 @@ type AuthSession = {
   wallet: AkordWallet;
   jwt: string;
 }
+
+type UserData = {
+  username: string;
+  attributes: any
+  mfaType?: MfaType;
+}
+
+type MfaType = "BACKUP_PHRASE" | "SMS"
 
 function apiConfig(env?: string): ApiConfig {
   switch (env) {
