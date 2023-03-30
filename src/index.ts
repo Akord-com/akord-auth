@@ -9,6 +9,7 @@ class Auth {
   public static config: ApiConfig
   public static storage: Storage
   public static pool: CognitoUserPool
+  private static user: CognitoUser
   private constructor() { }
 
   public static init(options: AuthOptions = defaultAuthOptions) {
@@ -35,6 +36,18 @@ class Auth {
   */
   public static signIn = async function (email: string, password: string): Promise<AuthSession> {
     const { user, session } = await Auth.authenticateUser(email, password)
+    const attributes = await Auth.retrieveUserAttributes(user)
+    const wallet = await AkordWallet.importFromEncBackupPhrase(password, attributes["custom:encBackupPhrase"]);
+    return { wallet, jwt: session.getIdToken().getJwtToken() }
+  };
+
+  /**
+* @param  {string} email
+* @param  {string} password
+* @returns Promise with AuthSession containing Akord Wallet and jwt token
+*/
+  public static confirmSignIn = async function (confirmationCode: string, password: string): Promise<AuthSession> {
+    const { user, session } = await Auth.confirmUser(confirmationCode)
     const attributes = await Auth.retrieveUserAttributes(user)
     const wallet = await AkordWallet.importFromEncBackupPhrase(password, attributes["custom:encBackupPhrase"]);
     return { wallet, jwt: session.getIdToken().getJwtToken() }
@@ -203,7 +216,7 @@ class Auth {
     return null
   }
 
-  public static getUser = async function (): Promise<UserData> {
+  public static getUser = async function (bypassCache: boolean): Promise<UserData> {
     const { user } = await Auth.getCurrentSessionUser()
     return await new Promise((resolve, reject) =>
       user.getUserData((err, data) => {
@@ -225,7 +238,7 @@ class Auth {
           mfaType = "SMS"
         }
         resolve({ username: Username, mfaType: mfaType, attributes: attributes })
-      })
+      }, { bypassCache: bypassCache })
     )
   }
 
@@ -252,21 +265,27 @@ class Auth {
       }))
   }
 
-  public static enableMFA = async function (mfaType: MfaType, phoneNumber?: string): Promise<void> {
+  public static enableMFA = async function (mfaType: MfaType): Promise<void> {
     const { user } = await Auth.getCurrentSessionUser();
     if (mfaType === "BACKUP_PHRASE") {
       await this.updateUserAttribute("custom:backupPhraseMFA", "true")
     } else {
-      if (!phoneNumber) {
-        throw Error("Phone number is required for SMS MFA")
+      let smsMfaSettings = null;
+      let totpMfaSettings = null;
+      if (mfaType === "SMS") {
+        smsMfaSettings = {
+          PreferredMfa: true,
+          Enabled: true,
+        };
       }
-      await this.updateUserAttribute("phone_number", phoneNumber)
-      const smsMfaSettings = {
-        PreferredMfa: true,
-        Enabled: true,
-      };
+      else if (mfaType === "TOTP") {
+        totpMfaSettings = {
+          PreferredMfa: true,
+          Enabled: true,
+        };
+      }
       await new Promise((resolve, reject) =>
-        user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
+        user.setUserMfaPreference(smsMfaSettings, totpMfaSettings, function (err, result) {
           if (err) {
             reject(err.message || JSON.stringify(err));
           }
@@ -289,6 +308,35 @@ class Auth {
           reject(err.message || JSON.stringify(err));
         }
         resolve("mfa_disabled");
+      })
+    );
+  }
+
+  public static registerPhoneNumber = async function (phoneNumber: string): Promise<void> {
+    const { user } = await Auth.getCurrentSessionUser();
+    await this.updateUserAttribute("phone_number", phoneNumber)
+    await new Promise((resolve, reject) =>
+      user.getAttributeVerificationCode('phone_number', {
+        onSuccess: function (result) {
+          resolve(result)
+        },
+        onFailure: function (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+      })
+    );
+  }
+
+  public static verifyPhoneNumber = async function (verificationCode: string): Promise<void> {
+    const { user } = await Auth.getCurrentSessionUser();
+    await new Promise((resolve, reject) =>
+      user.verifyAttribute('phone_number', verificationCode, {
+        onSuccess: function (result) {
+          resolve(result)
+        },
+        onFailure: function (err) {
+          reject(err.message || JSON.stringify(err));
+        }
       })
     );
   }
@@ -362,7 +410,7 @@ class Auth {
     )
   }
 
-  private static authenticateUser = async function (email: string, password: string, verificationCode?: string): Promise<{
+  private static authenticateUser = async function (email: string, password: string): Promise<{
     user: CognitoUser,
     session: CognitoUserSession
   }> {
@@ -370,26 +418,47 @@ class Auth {
       Username: email,
       Password: password,
     };
-    const cognitoUser = this.getCognitoUser(email);
+    Auth.user = this.getCognitoUser(email);
     const authenticationDetails = new AuthenticationDetails(authenticationData);
     return new Promise((resolve, reject) =>
-      cognitoUser.authenticateUser(authenticationDetails, {
+      Auth.user.authenticateUser(authenticationDetails, {
         onSuccess: function (result) {
-          resolve({ user: cognitoUser, session: result })
+          resolve({ user: Auth.user, session: result })
         },
         onFailure: function (err) {
           console.log(err.message);
           console.log(JSON.stringify(err));
           reject(err.message);
         },
-        mfaRequired: function (_) {
-          if (!verificationCode) {
-            reject({mfaRequired: true, mfaType: "SMS"})
-          }
-          cognitoUser.sendMFACode(verificationCode, this);
+        mfaSetup: function (challengeName, challengeParameters) {
+          Auth.user.associateSoftwareToken(this);
         },
+        totpRequired: function (secretCode) {
+          reject({ mfaRequired: true, mfaType: "TOTP" })
+        },
+        mfaRequired: function (_) {
+          reject({ mfaRequired: true, mfaType: "SMS" })
+        }
       })
     );
+  }
+
+  private static confirmUser = async function (verificationCode: string): Promise<{
+    user: CognitoUser,
+    session: CognitoUserSession
+  }> {
+    return new Promise((resolve, reject) =>
+      Auth.user.sendMFACode(verificationCode, {
+        onSuccess: function (result) {
+          resolve({ user: Auth.user, session: result })
+        },
+        onFailure: function (err) {
+          console.log(err.message);
+          console.log(JSON.stringify(err));
+          reject(err.message);
+        }
+      })
+    )
   }
 
   private static getCognitoUser(username: string): CognitoUser {
@@ -432,7 +501,7 @@ type UserData = {
   mfaType?: MfaType;
 }
 
-type MfaType = "BACKUP_PHRASE" | "SMS"
+type MfaType = "BACKUP_PHRASE" | "SMS" | "TOTP"
 
 function apiConfig(env?: string): ApiConfig {
   switch (env) {
