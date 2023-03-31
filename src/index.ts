@@ -46,8 +46,8 @@ class Auth {
 * @param  {string} password
 * @returns Promise with AuthSession containing Akord Wallet and jwt token
 */
-  public static confirmSignIn = async function (confirmationCode: string, password: string): Promise<AuthSession> {
-    const { user, session } = await Auth.confirmUser(confirmationCode)
+  public static confirmSignIn = async function (confirmationCode: string, password: string, mfaType: MfaType): Promise<AuthSession> {
+    const { user, session } = await Auth.confirmUser(confirmationCode, mfaType)
     const attributes = await Auth.retrieveUserAttributes(user)
     const wallet = await AkordWallet.importFromEncBackupPhrase(password, attributes["custom:encBackupPhrase"]);
     return { wallet, jwt: session.getIdToken().getJwtToken() }
@@ -236,6 +236,8 @@ class Auth {
           mfaType = "BACKUP_PHRASE"
         } else if (PreferredMfaSetting === "SMS_MFA") {
           mfaType = "SMS"
+        } else if (PreferredMfaSetting === "SOFTWARE_TOKEN_MFA") {
+          mfaType = "TOTP"
         }
         resolve({ username: Username, mfaType: mfaType, attributes: attributes })
       }, { bypassCache: bypassCache })
@@ -270,20 +272,22 @@ class Auth {
     if (mfaType === "BACKUP_PHRASE") {
       await this.updateUserAttribute("custom:backupPhraseMFA", "true")
     } else {
-      let smsMfaSettings = null;
-      let totpMfaSettings = null;
+      const smsMfaSettings = {
+        PreferredMfa: false,
+        Enabled: false,
+      };
+      const totpMfaSettings = {
+        PreferredMfa: false,
+        Enabled: false,
+      };
       if (mfaType === "SMS") {
-        smsMfaSettings = {
-          PreferredMfa: true,
-          Enabled: true,
-        };
+        smsMfaSettings.PreferredMfa = true
+        smsMfaSettings.Enabled = true
       }
       else if (mfaType === "TOTP") {
-        totpMfaSettings = {
-          PreferredMfa: true,
-          Enabled: true,
-        };
-      }
+        totpMfaSettings.PreferredMfa = true
+        totpMfaSettings.Enabled = true
+      };
       await new Promise((resolve, reject) =>
         user.setUserMfaPreference(smsMfaSettings, totpMfaSettings, function (err, result) {
           if (err) {
@@ -302,8 +306,12 @@ class Auth {
       PreferredMfa: false,
       Enabled: false,
     };
+    const totpMfaSettings = {
+      PreferredMfa: false,
+      Enabled: false,
+    };
     await new Promise((resolve, reject) =>
-      user.setUserMfaPreference(smsMfaSettings, null, function (err, result) {
+      user.setUserMfaPreference(smsMfaSettings, totpMfaSettings, function (err, result) {
         if (err) {
           reject(err.message || JSON.stringify(err));
         }
@@ -333,6 +341,35 @@ class Auth {
       user.verifyAttribute('phone_number', verificationCode, {
         onSuccess: function (result) {
           resolve(result)
+        },
+        onFailure: function (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+      })
+    );
+  }
+
+  public static associateSoftwareToken = async function (): Promise<string> {
+    const { user } = await Auth.getCurrentSessionUser();
+    Auth.user = user;
+
+    return await new Promise((resolve, reject) =>
+      Auth.user.associateSoftwareToken({
+        associateSecretCode: function (secretCode) {
+          resolve(secretCode)
+        },
+        onFailure: function (err) {
+          reject(err.message || JSON.stringify(err));
+        }
+      })
+    );
+  }
+
+  public static verifySoftwareToken = async function (totpCode: string, deviceName: string): Promise<void> {
+    await new Promise((resolve, reject) =>
+      Auth.user.verifySoftwareToken(totpCode, deviceName, {
+        onSuccess: function (session) {
+          resolve(session)
         },
         onFailure: function (err) {
           reject(err.message || JSON.stringify(err));
@@ -430,11 +467,8 @@ class Auth {
           console.log(JSON.stringify(err));
           reject(err.message);
         },
-        mfaSetup: function (challengeName, challengeParameters) {
-          Auth.user.associateSoftwareToken(this);
-        },
-        totpRequired: function (secretCode) {
-          reject({ mfaRequired: true, mfaType: "TOTP" })
+        totpRequired: function (secretCode, challengeParameters) {
+          reject({ mfaRequired: true, mfaType: "TOTP", secretCode: secretCode, challengeParameters: challengeParameters })
         },
         mfaRequired: function (_) {
           reject({ mfaRequired: true, mfaType: "SMS" })
@@ -443,10 +477,11 @@ class Auth {
     );
   }
 
-  private static confirmUser = async function (verificationCode: string): Promise<{
+  private static confirmUser = async function (verificationCode: string, mfaType?: MfaType): Promise<{
     user: CognitoUser,
     session: CognitoUserSession
   }> {
+    const mfa = mfaType === "TOTP" ? "SOFTWARE_TOKEN_MFA" : null
     return new Promise((resolve, reject) =>
       Auth.user.sendMFACode(verificationCode, {
         onSuccess: function (result) {
@@ -457,7 +492,7 @@ class Auth {
           console.log(JSON.stringify(err));
           reject(err.message);
         }
-      })
+      }, mfa)
     )
   }
 
