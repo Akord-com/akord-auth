@@ -10,16 +10,21 @@ class Auth {
   public static storage: Storage
   public static pool: CognitoUserPool
   private static user: CognitoUser
+
   private constructor() { }
 
-  public static init(options: AuthOptions = defaultAuthOptions) {
-    this.config = apiConfig(options.env)
-    if (options.authToken) {
-      this.authToken = options.authToken
-    } else if (options.apiKey) {
-      this.apiKey = options.apiKey
+  public static configure(options: AuthOptions = defaultAuthOptions) {
+    const optionsWithDefaults : AuthOptions = {
+      ...defaultAuthOptions,
+      ...options
+    }
+    this.config = apiConfig(optionsWithDefaults.env)
+    if (optionsWithDefaults.authToken) {
+      this.authToken = optionsWithDefaults.authToken
+    } else if (optionsWithDefaults.apiKey) {
+      this.apiKey = optionsWithDefaults.apiKey
     } else {
-      this.storage = options.storage
+      this.storage = optionsWithDefaults.storage
       this.pool = new CognitoUserPool({
         UserPoolId: this.config.userPoolId,
         ClientId: this.config.userPoolsWebClientId,
@@ -569,6 +574,8 @@ function getDefaultStorage() {
 function isNode() {
   return (typeof process !== 'undefined') && (process.release?.name === 'node')
 }
+
+Auth.configure()
 
 export {
   Auth,
