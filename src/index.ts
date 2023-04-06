@@ -198,12 +198,15 @@ class Auth {
         onFailure(err) {
           reject(err)
         },
-      }, { resetPasswordUrl: verifyUrl })
+      },
+        { resetPasswordUrl: verifyUrl }
+      )
     );
   }
 
-  public static forgotPasswordSubmit = async function (email: string, code: string, newPassword: string) {
-    const user = Auth.getCognitoUser(email);
+  public static forgotPasswordSubmit = async function (email: string, code: string, backupPhrase: string, newPassword: string) {
+    const wallet = await AkordWallet.recover(newPassword, backupPhrase)
+    const user = Auth.getCognitoUser(email)
     await new Promise((resolve, reject) =>
       user.confirmPassword(code, newPassword, {
         onSuccess() {
@@ -214,6 +217,8 @@ class Auth {
         },
       })
     );
+    await Auth.authenticateUser(email, newPassword)
+    await Auth.updateUserAttribute("custom:encBackupPhrase", wallet.encBackupPhrase)
   }
 
   /**
