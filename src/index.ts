@@ -91,7 +91,12 @@ class Auth {
   * @returns Promise with Akord Wallet
   */
   public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<void> {
-    const wallet = await AkordWallet.create(password);
+    let wallet: AkordWallet
+    if (options.wallet) {
+      wallet = options.wallet
+    } else {
+      wallet = await AkordWallet.create(password);
+    }
     const attributes = [];
     for (const [key, value] of Object.entries({
       email,
@@ -320,7 +325,7 @@ class Auth {
         if (err) {
           reject(err.message || JSON.stringify(err));
         }
-        resolve("mfa_disabled");
+        resolve(user);
       })
     );
   }
@@ -527,7 +532,8 @@ const defaultAuthOptions: AuthOptions = {
 type SignUpOptions = {
   clientType?: "WEB" | "CLI"
   verifyUrl?: string
-  referrerId?: string
+  referrerId?: string,
+  wallet?: AkordWallet
 }
 
 type AuthSession = {
