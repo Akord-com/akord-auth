@@ -14,7 +14,7 @@ class Auth {
   private constructor() { }
 
   public static configure(options: AuthOptions = defaultAuthOptions) {
-    const optionsWithDefaults : AuthOptions = {
+    const optionsWithDefaults: AuthOptions = {
       ...defaultAuthOptions,
       ...options
     }
@@ -193,6 +193,39 @@ class Auth {
       })
     );
   };
+
+  public static forgotPassword = async function (email: string, verifyUrl?: string) {
+    const user = Auth.getCognitoUser(email);
+    await new Promise((resolve, reject) =>
+      user.forgotPassword({
+        onSuccess() {
+          resolve(user)
+        },
+        onFailure(err) {
+          reject(err)
+        },
+      },
+        { resetPasswordUrl: verifyUrl }
+      )
+    );
+  }
+
+  public static forgotPasswordSubmit = async function (email: string, code: string, backupPhrase: string, newPassword: string) {
+    const wallet = await AkordWallet.recover(newPassword, backupPhrase)
+    const user = Auth.getCognitoUser(email)
+    await new Promise((resolve, reject) =>
+      user.confirmPassword(code, newPassword, {
+        onSuccess() {
+          resolve(user)
+        },
+        onFailure(err) {
+          reject(err)
+        },
+      })
+    );
+    await Auth.authenticateUser(email, newPassword)
+    await Auth.updateUserAttribute("custom:encBackupPhrase", wallet.encBackupPhrase)
+  }
 
   /**
    * Gets jwt token if available. For SRP auth:
