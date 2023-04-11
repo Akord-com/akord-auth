@@ -103,6 +103,7 @@ class Auth {
       "custom:encBackupPhrase": wallet.encBackupPhrase,
       "custom:publicKey": wallet.publicKey(),
       "custom:publicSigningKey": wallet.signingPublicKey(),
+      "custom:address": await wallet.getAddress(),
       "custom:referrerId": options.referrerId,
       "custom:mode": "dark",
       "custom:notifications": "true"
