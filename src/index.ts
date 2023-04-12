@@ -252,9 +252,13 @@ class Auth {
     if (this.apiKey) {
       return this.apiKey
     } else {
-      const token = await this.getAuthToken()
-      if (token) {
-        return `Bearer ${token}`
+      try {
+        const token = await this.getAuthToken()
+        if (token) {
+          return `Bearer ${token}`
+        }
+      } catch (e) {
+        // not authorized
       }
     }
     return null
