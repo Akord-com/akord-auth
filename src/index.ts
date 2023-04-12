@@ -10,14 +10,17 @@ class Auth {
   public static storage: Storage
   public static pool: CognitoUserPool
   private static user: CognitoUser
+  private static options: AuthOptions = {}
 
   private constructor() { }
 
   public static configure(options: AuthOptions = defaultAuthOptions) {
     const optionsWithDefaults: AuthOptions = {
       ...defaultAuthOptions,
+      ...this.options,
       ...options
     }
+    this.options = optionsWithDefaults
     this.config = apiConfig(optionsWithDefaults.env)
     if (optionsWithDefaults.authToken) {
       this.authToken = optionsWithDefaults.authToken
@@ -612,11 +615,20 @@ interface ApiConfig {
 }
 
 function getDefaultStorage() {
-  return isNode() ? null : window.localStorage
+  return isServer() ? null : window.sessionStorage
+}
+
+function isServer() {
+  return isNode() || isDeno()
 }
 
 function isNode() {
   return (typeof process !== 'undefined') && (process.release?.name === 'node')
+}
+
+
+function isDeno() {
+  return window && ("Deno" in window)
 }
 
 Auth.configure()
