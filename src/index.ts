@@ -268,36 +268,44 @@ class Auth {
   }
 
   public static getUser = async function (bypassCache: boolean): Promise<UserData> {
-    const { user } = await Auth.getCurrentSessionUser()
-    return await new Promise((resolve, reject) =>
-      user.getUserData((err, data) => {
-        if (err) {
-          reject(err);
-        }
-        const { Username, PreferredMfaSetting, UserAttributes } = data;
-        const attributes = UserAttributes.reduce(function (
-          attributesObject,
-          attribute
-        ) {
-          attributesObject[attribute.Name] = attribute.Value;
-          return attributesObject;
-        }, {});
-        let mfaType: MfaType
-        if (attributes["custom:backupPhraseMFA"] === "true") {
-          mfaType = "BACKUP_PHRASE"
-        } else if (PreferredMfaSetting === "SMS_MFA") {
-          mfaType = "SMS"
-        } else if (PreferredMfaSetting === "SOFTWARE_TOKEN_MFA") {
-          mfaType = "TOTP"
-        }
-        resolve({ username: Username, mfaType: mfaType, attributes: attributes })
-      }, { bypassCache: bypassCache })
-    )
+    try {
+      const { user } = await Auth.getCurrentSessionUser()
+      return await new Promise((resolve, reject) =>
+        user.getUserData((err, data) => {
+          if (err) {
+            reject(err);
+          }
+          const { Username, PreferredMfaSetting, UserAttributes } = data;
+          const attributes = UserAttributes.reduce(function (
+            attributesObject,
+            attribute
+          ) {
+            attributesObject[attribute.Name] = attribute.Value;
+            return attributesObject;
+          }, {});
+          let mfaType: MfaType
+          if (attributes["custom:backupPhraseMFA"] === "true") {
+            mfaType = "BACKUP_PHRASE"
+          } else if (PreferredMfaSetting === "SMS_MFA") {
+            mfaType = "SMS"
+          } else if (PreferredMfaSetting === "SOFTWARE_TOKEN_MFA") {
+            mfaType = "TOTP"
+          }
+          resolve({ username: Username, mfaType: mfaType, attributes: attributes })
+        }, { bypassCache: bypassCache })
+      )
+    } catch (e) {
+      return null
+    }
   }
 
   public static getUserAttributes = async function (): Promise<any> {
-    const { user } = await Auth.getCurrentSessionUser()
-    return await Auth.retrieveUserAttributes(user)
+    try {
+      const { user } = await Auth.getCurrentSessionUser()
+      return await Auth.retrieveUserAttributes(user)
+    } catch (e) {
+      return {}
+    }
   }
 
   public static updateUserAttribute = async function (attributeName: string, attributeValue: string): Promise<any> {
@@ -486,7 +494,7 @@ class Auth {
 
     const cognitoUser = this.pool.getCurrentUser();
     if (cognitoUser === null) {
-      //return new Error("Invalid session")
+      throw new Error("Invalid session")
     }
     return new Promise((resolve, reject) =>
       cognitoUser.getSession((err, session: CognitoUserSession) => {
