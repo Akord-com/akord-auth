@@ -93,7 +93,7 @@ class Auth {
   * @param  {SignUpOptions} options JSON client metadata, ex: { clientType: "CLI" }
   * @returns Promise with Akord Wallet
   */
-  public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<void> {
+  public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<{ wallet: AkordWallet }> {
     let wallet: AkordWallet
     if (options.wallet) {
       wallet = options.wallet
@@ -125,6 +125,7 @@ class Auth {
         }
       }, { verifyUrl: options.verifyUrl })
     );
+    return { wallet };
   };
 
   public static resendCode = async function (email: string): Promise<Object> {
