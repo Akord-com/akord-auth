@@ -31,7 +31,7 @@ class Auth {
       this.pool = new CognitoUserPool({
         UserPoolId: this.config.userPoolId,
         ClientId: this.config.userPoolsWebClientId,
-        Storage: options.storage
+        Storage: this.storage
       })
     }
   }
