@@ -12,7 +12,7 @@ describe("Testing auth functions", () => {
   beforeAll(async () => {
     email = faker.internet.email();
     password = faker.internet.password();
-    Auth.init({ env: "dev" });
+    Auth.configure({ env: "dev" });
   });
 
   it("should sign in", async () => {
@@ -31,7 +31,7 @@ describe("Testing passwordless auth functions", () => {
   beforeAll(async () => {
     wallet = await AkordWallet.create("password");
     email = faker.internet.email();
-    Auth.init({ env: "dev" });
+    Auth.configure({ env: "dev" });
   });
 
   it("should sign up", async () => {
