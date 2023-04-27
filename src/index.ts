@@ -57,7 +57,7 @@ class Auth {
     const address = await wallet.getAddress();
     const cognitoUser = Auth.getCognitoUser(address);
     const authenticationData = {
-      Username: address
+      Username: address + "@temp.akord.com"
     };
     const privateKey = wallet.signingPrivateKeyRaw();
     const authenticationDetails = new AuthenticationDetails(authenticationData);
@@ -180,11 +180,13 @@ class Auth {
       "custom:publicSigningKey": wallet.signingPublicKey(),
       "custom:address": address,
       "custom:referrerId": options.referrerId,
+      "custom:mode": "dark",
+      "custom:notifications": "true",
       "custom:passwordless": "true"
     });
 
     await new Promise((resolve, reject) =>
-      this.pool.signUp(address, random, attributes, null, (err, result) => {
+      this.pool.signUp(address + "@temp.akord.com", random, attributes, null, (err, result) => {
         if (err) {
           reject(err);
         } else {
