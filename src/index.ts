@@ -55,9 +55,10 @@ class Auth {
   */
   public static signInWithWallet = async function (wallet: AkordWallet): Promise<AuthSession> {
     const address = await wallet.getAddress();
-    const cognitoUser = Auth.getCognitoUser(address);
+    const username = address + "@temp.akord.com";
+    const cognitoUser = Auth.getCognitoUser(username);
     const authenticationData = {
-      Username: address + "@temp.akord.com"
+      Username: username
     };
     const privateKey = wallet.signingPrivateKeyRaw();
     const authenticationDetails = new AuthenticationDetails(authenticationData);
