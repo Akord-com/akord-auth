@@ -69,7 +69,7 @@ class Auth {
           resolve({ user: cognitoUser, session: result })
         },
         onFailure: function (err) {
-          return reject(err.message);
+          return reject(err);
         },
         customChallenge: async function (challengeParameters: { nonce: string }) {
           const signature = await signString(challengeParameters.nonce, privateKey);
@@ -114,7 +114,7 @@ class Auth {
       const session = await new Promise((resolve, reject) =>
         cognitoUser.getSession((err, session: CognitoUserSession) => {
           if (err || !session) {
-            reject(err || "Invalid session")
+            reject(err || new Error("Invalid session"))
           }
           resolve(session)
         })
@@ -391,7 +391,7 @@ class Auth {
     await new Promise((resolve, reject) =>
       user.updateAttributes(attributeList, function (err, result) {
         if (err) {
-          reject(err.message || JSON.stringify(err));
+          reject(err);
         }
         resolve(result);
       }))
@@ -421,7 +421,7 @@ class Auth {
       await new Promise((resolve, reject) =>
         user.setUserMfaPreference(smsMfaSettings, totpMfaSettings, function (err, result) {
           if (err) {
-            reject(err.message || JSON.stringify(err));
+            reject(err);
           }
           resolve("mfa_enabled");
         })
@@ -443,7 +443,7 @@ class Auth {
     await new Promise((resolve, reject) =>
       user.setUserMfaPreference(smsMfaSettings, totpMfaSettings, function (err, result) {
         if (err) {
-          reject(err.message || JSON.stringify(err));
+          reject(err);
         }
         resolve(user);
       })
@@ -459,7 +459,7 @@ class Auth {
           resolve(result)
         },
         onFailure: function (err) {
-          reject(err.message || JSON.stringify(err));
+          reject(err);
         }
       })
     );
@@ -473,7 +473,7 @@ class Auth {
           resolve(result)
         },
         onFailure: function (err) {
-          reject(err.message || JSON.stringify(err));
+          reject(err);
         }
       })
     );
@@ -489,7 +489,7 @@ class Auth {
           resolve(secretCode)
         },
         onFailure: function (err) {
-          reject(err.message || JSON.stringify(err));
+          reject(err);
         }
       })
     );
@@ -502,7 +502,7 @@ class Auth {
           resolve(session)
         },
         onFailure: function (err) {
-          reject(err.message || JSON.stringify(err));
+          reject(err);
         }
       })
     );
@@ -544,7 +544,7 @@ class Auth {
     return new Promise((resolve, reject) => {
       user.getUserAttributes(async function (err, result) {
         if (err) {
-          reject(err.message);
+          reject(err);
         }
         const attributes = result.reduce(function (
           attributesObject,
@@ -570,7 +570,7 @@ class Auth {
     return new Promise((resolve, reject) =>
       cognitoUser.getSession((err, session: CognitoUserSession) => {
         if (err || !session) {
-          reject(err || "Invalid session")
+          reject(err || new Error("Invalid session"))
         }
         resolve({ user: cognitoUser, session })
       })
@@ -593,9 +593,7 @@ class Auth {
           resolve({ user: Auth.user, session: result })
         },
         onFailure: function (err) {
-          console.log(err.message);
-          console.log(JSON.stringify(err));
-          reject(err.message);
+          reject(err);
         },
         totpRequired: function (secretCode, challengeParameters) {
           reject({ mfaRequired: true, mfaType: "TOTP", secretCode: secretCode, challengeParameters: challengeParameters })
@@ -618,9 +616,7 @@ class Auth {
           resolve({ user: Auth.user, session: result })
         },
         onFailure: function (err) {
-          console.log(err.message);
-          console.log(JSON.stringify(err));
-          reject(err.message);
+          reject(err);
         }
       }, mfa)
     )
