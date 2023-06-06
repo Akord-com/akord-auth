@@ -1,7 +1,5 @@
 import { AkordWallet, signString } from "@akord/crypto";
 import { AuthenticationDetails, CognitoUser, CognitoUserAttribute, CognitoUserPool, CognitoUserSession } from "amazon-cognito-identity-js";
-import { FileStorage } from "./storage";
-
 
 class Auth {
   public static authToken: string
@@ -720,6 +718,5 @@ function isDeno() {
 Auth.configure()
 
 export {
-  Auth,
-  FileStorage
+  Auth
 }
