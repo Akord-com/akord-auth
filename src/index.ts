@@ -1,7 +1,7 @@
 import { AkordWallet, signString } from "@akord/crypto";
 import { AuthenticationDetails, CognitoUser, CognitoUserAttribute, CognitoUserPool, CognitoUserSession } from "amazon-cognito-identity-js";
 
-class Auth {
+export class Auth {
   public static authToken: string
   public static apiKey: string
   public static config: ApiConfig
@@ -196,7 +196,7 @@ class Auth {
     return { wallet };
   };
 
-  public static resendCode = async function (email: string): Promise<Object> {
+  public static resendCode = async function (email: string, options: ResendSignUpOptions = {}): Promise<Object> {
     const user = Auth.getCognitoUser(email);
     return new Promise((resolve, reject) =>
       user.resendConfirmationCode((err, result) => {
@@ -205,7 +205,7 @@ class Auth {
         } else {
           resolve(result);
         }
-      })
+      }, { verifyUrl: options.verifyUrl, clientType: options.clientType })
     );
   }
 
@@ -654,25 +654,30 @@ const defaultAuthOptions: AuthOptions = {
   storage: getDefaultStorage(),
 }
 
-type SignUpOptions = {
+export type ResendSignUpOptions = {
   clientType?: "WEB" | "CLI"
   verifyUrl?: string
-  referrerId?: string,
+}
+
+export type SignUpOptions = {
+  clientType?: "WEB" | "CLI"
+  verifyUrl?: string
+  referrerId?: string
   wallet?: AkordWallet
 }
 
-type AuthSession = {
-  wallet: AkordWallet;
-  jwt: string;
+export type AuthSession = {
+  wallet: AkordWallet
+  jwt: string
 }
 
-type UserData = {
-  username: string;
+export type UserData = {
+  username: string
   attributes: any
-  mfaType?: MfaType;
+  mfaType?: MfaType
 }
 
-type MfaType = "BACKUP_PHRASE" | "SMS" | "TOTP"
+export type MfaType = "BACKUP_PHRASE" | "SMS" | "TOTP"
 
 function apiConfig(env?: string): ApiConfig {
   switch (env) {
@@ -716,7 +721,3 @@ function isDeno() {
 }
 
 Auth.configure()
-
-export {
-  Auth
-}
