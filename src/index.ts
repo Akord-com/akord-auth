@@ -336,7 +336,7 @@ export class Auth {
     return null
   }
 
-  public static getUser = async function (bypassCache?: boolean): Promise<UserData> {
+  public static getUser = async function (bypassCache: boolean = false): Promise<UserData> {
     try {
       const { user } = await Auth.getCurrentSessionUser()
       return await new Promise((resolve, reject) =>
@@ -361,7 +361,7 @@ export class Auth {
             mfaType = "TOTP"
           }
           resolve({ username: Username, mfaType: mfaType, attributes: attributes })
-        }, { bypassCache: bypassCache = false })
+        }, { bypassCache: bypassCache })
       )
     } catch (e) {
       return null
