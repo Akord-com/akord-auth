@@ -11,6 +11,6 @@
     "allowJs": true,
     "moduleResolution": "Node"
   },
-  "include": ["src"],
+  "include": ["src", "env.d.ts"],
   "exclude": ["node_modules", "**/__tests__/*", "src/__tests__/*"]
 }

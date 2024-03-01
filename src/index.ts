@@ -1,5 +1,6 @@
-import { AkordWallet, signString } from "@akord/crypto";
+import { AkordWallet } from "@akord/crypto";
 import { AuthenticationDetails, CognitoUser, CognitoUserAttribute, CognitoUserPool, CognitoUserSession } from "amazon-cognito-identity-js";
+import ArweaveWallet from "./arweave";
 
 export class Auth {
   public static authToken: string
@@ -48,17 +49,20 @@ export class Auth {
   };
 
   /**
-  * @param  {string} wallet akord wallet instance
+  * @param  {SignInOptions} options akord wallet instance
   * @returns  Promise with AuthSession containing Akord Wallet and jwt token
   */
-  public static signInWithWallet = async function (wallet: AkordWallet): Promise<AuthSession> {
-    const address = await wallet.getAddress();
+  public static signInWithWallet = async (options: SignInOptions = {}): Promise<{ jwt: string }> => {
+    if (!options.wallet) {
+      throw new Error("Please provide your wallet in options parameter.")
+    }
+    const address = await options.wallet.getAddress();
+
     const username = address + "@temp.akord.com";
     const cognitoUser = Auth.getCognitoUser(username);
     const authenticationData = {
       Username: username
     };
-    const privateKey = wallet.signingPrivateKeyRaw();
     const authenticationDetails = new AuthenticationDetails(authenticationData);
     const { session } = await new Promise((resolve, reject) => {
       cognitoUser.setAuthenticationFlowType("CUSTOM_AUTH");
@@ -70,7 +74,9 @@ export class Auth {
           return reject(err);
         },
         customChallenge: async function (challengeParameters: { nonce: string }) {
-          const signature = await signString(challengeParameters.nonce, privateKey);
+
+          const signature = await options.wallet.sign(challengeParameters.nonce);
+
           cognitoUser.sendCustomChallengeAnswer(signature, this);
         },
       })
@@ -80,7 +86,7 @@ export class Auth {
       session: CognitoUserSession
     };
     const jwt = session.getIdToken().getJwtToken();
-    return { wallet, jwt };
+    return { jwt };
   }
 
   /**
@@ -128,8 +134,8 @@ export class Auth {
   * @param  {SignUpOptions} options JSON client metadata, ex: { clientType: "CLI" }
   * @returns Promise with Akord Wallet
   */
-  public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<{ wallet: AkordWallet }> {
-    let wallet: AkordWallet
+  public static signUp = async function (email: string, password: string, options: SignUpOptions = {}): Promise<{ wallet: AkordWallet | ArweaveWallet }> {
+    let wallet: AkordWallet | ArweaveWallet
     if (options.wallet) {
       wallet = options.wallet
     } else {
@@ -138,7 +144,7 @@ export class Auth {
     const attributes = [];
     for (const [key, value] of Object.entries({
       email,
-      "custom:encBackupPhrase": wallet.encBackupPhrase,
+      "custom:encBackupPhrase": (<any>wallet).encBackupPhrase,
       "custom:publicKey": wallet.publicKey(),
       "custom:publicSigningKey": wallet.signingPublicKey(),
       "custom:address": await wallet.getAddress(),
@@ -164,36 +170,45 @@ export class Auth {
   };
 
   /**
-  * @param  {AkordWallet} wallet akord wallet instance
   * @param  {SignUpOptions} options JSON client metadata, ex: { clientType: "CLI" }
   * @returns Promise with Akord Wallet
   */
-  public static signUpWithWallet = async function (wallet?: AkordWallet, options: SignUpOptions = {}): Promise<{ wallet: AkordWallet }> {
+  public static signUpWithWallet = async function (options: SignUpOptions = {}): Promise<{ wallet: AkordWallet | ArweaveWallet }> {
     const random = Math.random().toString(30);
-    if (!wallet) {
-      wallet = await AkordWallet.create(random);
+    if (!options.wallet) {
+      throw new Error("Please provide your wallet in options parameter.")
     }
-    const address = await wallet.getAddress();
-    const attributes = Auth.jsonToUserAttributes({
-      "custom:publicKey": wallet.publicKey(),
-      "custom:publicSigningKey": wallet.signingPublicKey(),
+
+    const address = await options.wallet.getAddress();
+    const publicSigningKey = await options.wallet.publicKey();
+    const publicKey = await options.wallet.publicKey();
+
+    const username = address + "@temp.akord.com";
+    const attributes = {
+      "custom:publicKey": publicKey,
+      "custom:publicSigningKey": publicSigningKey,
       "custom:address": address,
       "custom:referrerId": options.referrerId,
       "custom:mode": "dark",
       "custom:notifications": "true",
-      "custom:passwordless": "true"
-    });
-
+      "custom:passwordless": "true",
+    };
+    if (options.wallet instanceof ArweaveWallet) {
+      attributes["custom:walletType"] = "ARWEAVE";
+    }
+    if (options.email) {
+      attributes["custom:email"] = options.email;
+    }
     await new Promise((resolve, reject) =>
-      this.pool.signUp(address + "@temp.akord.com", random, attributes, null, (err, result) => {
+      this.pool.signUp(username, random, Auth.jsonToUserAttributes(attributes), [], (err, result) => {
         if (err) {
           reject(err);
         } else {
           resolve(result);
         }
-      }, { verifyUrl: options.verifyUrl, clientType: options.clientType })
+      }, {})
     );
-    return { wallet };
+    return { wallet: options.wallet };
   };
 
   public static resendCode = async function (email: string, options: ResendSignUpOptions = {}): Promise<Object> {
@@ -654,20 +669,28 @@ const defaultAuthOptions: AuthOptions = {
   storage: getDefaultStorage(),
 }
 
+type Wallet = AkordWallet | ArweaveWallet;
+
 export type ResendSignUpOptions = {
   clientType?: "WEB" | "CLI"
   verifyUrl?: string
 }
 
 export type SignUpOptions = {
-  clientType?: "WEB" | "CLI"
+  clientType?: "WEB" | "CLI",
   verifyUrl?: string
   referrerId?: string
-  wallet?: AkordWallet
+  wallet?: Wallet
+  email?: string
+}
+
+export type SignInOptions = {
+  clientType?: "WEB" | "CLI",
+  wallet?: Wallet
 }
 
 export type AuthSession = {
-  wallet: AkordWallet
+  wallet: Wallet
   jwt: string
 }
 

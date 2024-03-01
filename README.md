@@ -58,3 +58,15 @@ await new Auth().verifyAccount("winston@gmail.com", 123456);
 </details>
 
 #### `refreshToken()`
+
+
+### Development
+```
+yarn install
+yarn build
+```
+
+To run tests:
+```
+node --inspect node_modules/.bin/jest ./src/__tests__/auth.test.ts
+```
